@@ -13,26 +13,24 @@ global {
     file shape_file_semaforos <- file("../includes/semaforos/semaforos2.shp");
     geometry shape <- envelope(shape_file_roads);
 
-    int nb_autos <- 200;
-    int nb_autos_max <- 350;
-    float min_speed <- 1 #km/#h;
-    float max_speed <- 2 #km/#h;
-
-    int sema_ciclo <- 0;
     date starting_date <- date("2025-10-10-00-00-00");
     float step <- 0.3 #mn;
+    
+    int nb_autos <- 200;
+    int nb_autos_max <- 350;
+    float min_speed <- 0.5 #km/#h;
+    float max_speed <- 2 #km/#h;
+    int autos_en_movimiento <- 0;
 
     int hora_apertura <- 8;
     int hora_cierre <- 22;
 
-    graph the_graph;
+    int sema_ciclo <- 0;
     list<semaforo> sema_id3 <- [];
     list<semaforo> sema_id4 <- [];
-
-    float densidad_promedio <- 0.0;
-    float densidad_maxima <- 0.0;
-    int autos_en_movimiento <- 0;
-
+	
+    graph the_graph;
+	 // ================= Inicialización =================
     init {
         create universidad from: shape_file_uni;
         create road from: shape_file_roads;
@@ -53,9 +51,7 @@ global {
             velocidad_original <- velocidad;
             location <- any_location_in(one_of(road));
             estacionado <- false;
-            tiempo_estacionado <- 0;
-            ciclos_sin_movimiento <- 0;
-
+            
             if rnd(1.0) < 0.4 {
                 // Autos amarillos (universitarios) con camino garantizado
                 tipo_uni <- true;
@@ -107,7 +103,8 @@ global {
             }
         }
     }
-
+	
+	// ================= Reflexs =================
     reflex avanzar_tiempo {
         current_date <- current_date + step #hour;
     }
@@ -126,18 +123,8 @@ global {
     }
 
     reflex calcular_densidad_trafico {
-        float total_densidad <- 0.0;
-        densidad_maxima <- 0.0;
-
-        loop calle over: road {
-            int autos_en_calle <- auto count (each distance_to calle < 3);
-            float densidad_calle <- autos_en_calle / max(calle.shape.perimeter, 1.0);
-            total_densidad <- total_densidad + densidad_calle;
-            densidad_maxima <- max([densidad_maxima, densidad_calle]);
-        }
-
-        densidad_promedio <- total_densidad / max(length(road), 1);
-        autos_en_movimiento <- auto count (each.destino != nil);
+        
+        autos_en_movimiento <- auto count (each.estacionado != true);
     }
 
     reflex gestionar_densidad_autos {
@@ -246,6 +233,7 @@ global {
     }
 }
 
+// ================= Species =================
 
 species punto1 { 
     rgb color <- #brown; 
@@ -280,17 +268,14 @@ species auto skills: [moving] {
     point ubicacion_anteriorUni <- nil;
 
     point ubicacion_anterior <- nil;
-    list<point> historial_ubicaciones <- [];
     float velocidad;
     float velocidad_original;
-    int ciclos_sin_movimiento <- 0;
-
+    
     bool volviendo_de_uni <- false;
     bool yendo_a_uni <- false;
 
     bool estacionado <- false;
-    int tiempo_estacionado <- 0;
-
+    
     int tiempo_en_casa <- 0;
 
     bool tipo_uni <- false;
@@ -325,14 +310,14 @@ species auto skills: [moving] {
 
         // Cada ciclo equivale a un paso de simulación (step = 0.3 minutos)
         // 1 hora = 60 minutos → 60 / 0.3 ≈ 200 ciclos
-        if tiempo_en_casa > 50 {
+        if tiempo_en_casa > 5 {
             do die;
         }
     }
 
     // movimiento
     reflex mover when: destino != nil and (not estacionado or tipo_uni) {
-        semaforo semaforo_cercano <- one_of(semaforo where (distance_to(location, each) < 5));
+        semaforo semaforo_cercano <- one_of(semaforo where (distance_to(location, each) < 3));
 
         bool puede_avanzar <- true;
 
@@ -391,9 +376,10 @@ species auto skills: [moving] {
     aspect base { draw circle(8) color: color border: #black; }
 }
 
-
+// ================= Experiment =================
 experiment simulacion_trafico type: gui {
     parameter "Número de autos" var: nb_autos_max category: "Autos";
+    float minimum_cycle_duration <- 0.01#s;
 
     output {
         display city_display type: opengl {
@@ -406,11 +392,20 @@ experiment simulacion_trafico type: gui {
         }
 
         display grafico_densidad_trafico type: 2d refresh: every(10 #cycles) {
-            chart "Densidad de Tráfico Vehicular" type: series {
-                data "Densidad Promedio" value: densidad_promedio;
-                data "Densidad Máxima" value: densidad_maxima;
-                data "Autos en Movimiento" value: autos_en_movimiento;
-            }
-        }
-    }
+            chart "Densidad de Tráfico Vehicular" type: series  
+            	x_label: "Hora del Día (200 ciclos / hr)"
+            	y_label: "Autos en Movimiento"
+            	lines: true
+            	color: #black
+            	background: #white 
+            	{	
+
+                data "Densidad de Autos" 
+                	value: autos_en_movimiento 
+                	color:#green
+                	;
+            	}
+            	
+    	}
+	}
 }
