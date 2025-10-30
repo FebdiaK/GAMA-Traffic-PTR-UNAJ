@@ -51,7 +51,7 @@ global {
             velocidad_original <- velocidad;
             location <- any_location_in(one_of(road));
             estacionado <- false;
-            
+             
             if rnd(1.0) < 0.4 {
                 // Autos amarillos (universitarios) con camino garantizado
                 tipo_uni <- true;
@@ -218,15 +218,21 @@ global {
                     tipo_uni <- false;
                     yendo_a_uni <- false;
                     estacionado <- false;
-                    location <- any_location_in(one_of(road));
+                    
+                    // Generar ubicación y destino válidos
+                    point loc_in_road <- any_location_in(one_of(road));
+                    point uni_dest <- nil;
+                    if rnd(1.0) < 0.5 { uni_dest <- one_of(punto1).shape.centroid; } 
+                    else { uni_dest <- one_of(punto2).shape.centroid; }
 
-                    // Destino inicial válido
-                    point new_dest <- nil;
-                    loop while:true {
-                        new_dest <- any_location_in(one_of(road));
-                        if distance_to(location, new_dest) > 0.5 { break; }
+                    path camino <- path_between(the_graph, loc_in_road, uni_dest);
+                    loop while: camino = nil {
+                        loc_in_road <- any_location_in(one_of(road));
+                        camino <- path_between(the_graph, loc_in_road, uni_dest);
                     }
-                    destino <- new_dest;
+
+                    location <- loc_in_road;
+                    destino <- loc_in_road;
                 }
             }
         }
