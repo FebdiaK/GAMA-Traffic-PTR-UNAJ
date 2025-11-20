@@ -21,6 +21,10 @@ global {
     float min_speed <- 0.5 #km/#h;
     float max_speed <- 2 #km/#h;
     int autos_en_movimiento <- 0;
+    int autos_en_uni <-0;
+    int autos_amarillos_actuales;
+    int autosAmaFueraDeUni;
+    int autosVolviendoACasa;
 
     int hora_apertura <- 8;
     int hora_cierre <- 22;
@@ -58,6 +62,9 @@ global {
                 yendo_a_uni <- false;
                 color <- #yellow;
                 hora_llegada <- rnd(hora_apertura, 19);
+                // Asignar una hora de salida dinámica
+				int llegada_segura <- min(hora_llegada, hora_cierre - 1);
+				hora_salida <- rnd(llegada_segura + 1, hora_cierre);
 
                 // Ubicación inicial válida
                 point loc_in_road <- any_location_in(one_of(road));
@@ -126,6 +133,12 @@ global {
         
         autos_en_movimiento <- auto count (each.estacionado != true);
     }
+    
+    reflex calcularAutosEnUni{
+        
+        autos_en_uni <- auto count (each.estacionado = true and each.color=#blue);
+    }
+    
 
     reflex gestionar_densidad_autos {
         // 🔻 Reducción progresiva del tráfico entre 23:00 y 5:00
@@ -171,7 +184,9 @@ global {
             }
         }
 
-        int autos_amarillos_actuales <- (list(auto) count (each.tipo_uni=true));
+        autos_amarillos_actuales <- (list(auto) count (each.tipo_uni=true));
+        autosAmaFueraDeUni <- (list(auto) count (each.tipo_uni=true and each.estacionado=false and each.volviendo_de_uni=false));
+        autosVolviendoACasa<- (list(auto) count (each.tipo_uni=true and each.volviendo_de_uni=true or each.en_casa));
 
         // 🏫 Generación gradual de autos amarillos (universitarios) entre 6:00 y 8:00
         if current_date.hour >= 5 and current_date.hour < 8 {
@@ -197,6 +212,8 @@ global {
                     yendo_a_uni <- false;
                     estacionado <- false;
                     hora_llegada <- rnd(hora_apertura, 19);
+                    int llegada_segura <- min(hora_llegada, hora_cierre - 1);
+                    hora_salida <- rnd(llegada_segura + 1, hora_cierre);
                     location <- loc_in_road;
                     ubicacion_anteriorUni <- location;
                     destino <- nil;
@@ -282,26 +299,29 @@ species auto skills: [moving] {
 
     bool estacionado <- false;
     
+    bool en_casa <- false;
     int tiempo_en_casa <- 0;
 
     bool tipo_uni <- false;
     int hora_llegada <- 0;
+    int hora_salida <- 0;
 
     // Ir a la universidad
-    reflex ir_a_la_uni when: tipo_uni and (current_date.hour >= hora_llegada and current_date.hour < 21) and not yendo_a_uni and not estacionado {
+    reflex ir_a_la_uni when: tipo_uni and (current_date.hour >= hora_llegada and current_date.hour < 21) and not yendo_a_uni and not estacionado and not en_casa
+    {
         yendo_a_uni <- true;
         if rnd(1.0) < 0.5 { destino <- one_of(punto1).shape.centroid; } 
         else { destino <- one_of(punto2).shape.centroid; }
     }
 
-    // Irse de la universidad a las 22
-    reflex irse_de_la_uni when: tipo_uni and current_date.hour >= 22 and estacionado {
+    // Irse de la universidad en su respectivo horario de salida
+    reflex irse_de_la_uni when: tipo_uni and (current_date.hour >= hora_salida) {
         estacionado <- false;
         yendo_a_uni <- false;
         volviendo_de_uni <- true;
 
         velocidad <- velocidad_original;
-        color <- #yellow;
+        color <- #blueviolet;
 
         // Calcular camino válido de regreso
         path camino_retorno <- path_between(the_graph, location, ubicacion_anteriorUni );
@@ -311,18 +331,27 @@ species auto skills: [moving] {
         destino <- ubicacion_anteriorUni;
     }
 
-    reflex eliminar_si_llego_a_casa when: estacionado and color = #gray {
+    reflex eliminar_si_llego_a_casa when: en_casa{
+ 
         tiempo_en_casa <- tiempo_en_casa + 1;
 
-        // Cada ciclo equivale a un paso de simulación (step = 0.3 minutos)
-        // 1 hora = 60 minutos → 60 / 0.3 ≈ 200 ciclos
-        if tiempo_en_casa > 5 {
-            do die;
-        }
+        // Paso de simulación = 0.3 minutos
+	    // 1 hora = 200 ciclos
+	    if tiempo_en_casa > 200 {
+	        do die;
+	    }
     }
 
     // movimiento
-    reflex mover when: destino != nil and (not estacionado or tipo_uni) {
+    reflex mover when: destino != nil and (not estacionado) {
+    	
+    	if en_casa {
+	        velocidad <- 0.0;
+	        destino <- nil;
+	        color <- #gray;
+	        return;
+    	}
+    	
         semaforo semaforo_cercano <- one_of(semaforo where (distance_to(location, each) < 3));
 
         bool puede_avanzar <- true;
@@ -353,6 +382,7 @@ species auto skills: [moving] {
             } else if tipo_uni and volviendo_de_uni {
                 estacionado <- true;
                 volviendo_de_uni <- false;
+                en_casa <- true;
                 velocidad <- 0.0;
                 color <- #gray;
                 destino <- nil;
@@ -369,7 +399,7 @@ species auto skills: [moving] {
         }
 
         // Evitar autos pegados
-        if ubicacion_anterior != nil and distance_to(location,ubicacion_anterior) < 0.3 {
+        if not en_casa and ubicacion_anterior != nil and distance_to(location,ubicacion_anterior) < 0.3 {
             point new_dest <- nil;
             loop while:true {
                 new_dest <- any_location_in(one_of(road));
@@ -383,6 +413,7 @@ species auto skills: [moving] {
 }
 
 // ================= Experiment =================
+
 experiment simulacion_trafico type: gui {
     parameter "Número de autos" var: nb_autos_max category: "Autos";
     float minimum_cycle_duration <- 0.01#s;
@@ -412,6 +443,15 @@ experiment simulacion_trafico type: gui {
                 	;
             	}
             	
+    	}
+    	
+    	display grafico_autosEnUni type: 2d refresh: every(10#cycles){
+    		chart "Cantidad de Autos en la Universidad" type: pie
+    			{
+    				data "Autos Estacionados en la UNAJ" value: autos_en_uni color: #blue;
+    				data "Autos por ir a la UNAJ" value: autosAmaFueraDeUni color: #yellow;
+    				data "Autos yéndose de la UNAJ" value: autosVolviendoACasa color: #gray;
+    		}
     	}
 	}
 }
